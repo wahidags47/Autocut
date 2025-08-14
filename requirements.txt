@@ -1,4 +1,3 @@
-git+https://github.com/rongardF/tvdatafeed.git
 requests
+pandas
 numpy
-TA-Lib
