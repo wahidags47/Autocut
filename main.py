@@ -103,7 +103,10 @@ if __name__ == "__main__":
                                 send_telegram(f"⚪ RESISTANCE TEST: {symbol} {price:.2f} dekat resistance {res:.2f}")
 
             time.sleep(300)  # cek tiap 5 menit
+ # Kirim live price setelah loop semua simbol
+            send_telegram(live_prices_msg)
 
+            time.sleep(300)  # cek tiap 5 menit
         except Exception as e:
             send_telegram(f"⚠️ Error: {e}")
             time.sleep(30)
