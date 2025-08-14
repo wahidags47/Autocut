@@ -60,6 +60,9 @@ def telegram_webhook():
         chat_id = update["message"]["chat"]["id"]
         text = update["message"].get("text", "").strip().lower()
 
+        # Test print chat_id di log Railway
+        print(f"Chat ID Detected: {chat_id}")
+
         if text.startswith("/price"):
             parts = text.split()
             if len(parts) == 2:
@@ -83,8 +86,7 @@ def set_webhook():
     print(r.json())
 
 # ===== AUTO ALERT LOOP =====
-@app.before_first_request
-def activate_job():
+def start_auto_alert():
     def run_job():
         while True:
             try:
@@ -99,4 +101,5 @@ def activate_job():
 
 if __name__ == "__main__":
     set_webhook()
+    start_auto_alert()
     app.run(host="0.0.0.0", port=5000)
