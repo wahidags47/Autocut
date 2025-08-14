@@ -5,8 +5,8 @@ import pandas as pd
 import numpy as np
 
 # =============== KONFIG ENV ===============
-TELEGRAM_TOKEN = os.getenv("8400411121:AAEndGuw6PGtv6y0hGcxeR7O3G1-QWJqGtk")
-TELEGRAM_CHAT_ID = os.getenv("691664631")
+TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 SYMBOLS = ["LTCUSDT", "BTCUSDT", "ETHUSDT"]  # Pair yang dimonitor
 INTERVAL = "15m"  # Timeframe Binance: 1m,3m,5m,15m,1h,4h,1d
@@ -70,4 +70,40 @@ if __name__ == "__main__":
                 l = df['low'].to_numpy()
 
                 price = c[-1]
-                ma50 = pd.Series
+                ma50 = pd.Series(c).rolling(50).mean().iloc[-1]
+                ma200 = pd.Series(c).rolling(200).mean().iloc[-1]
+                trend_up = ma50 > ma200
+                trend_down = ma50 < ma200
+
+                sup_piv, res_piv = pivot_levels(h, l, c)
+                swing_res, swing_sup = swing_levels(h, l)
+                all_supports = sorted(set(sup_piv + swing_sup))
+                all_resists = sorted(set(res_piv + swing_res))
+
+                # Cek support
+                for sup in all_supports:
+                    if pct_diff(price, sup) <= NEAR_TOL:
+                        alert_id = f"{symbol}-SUP-{sup:.2f}"
+                        if alert_id not in last_alerts:
+                            last_alerts.add(alert_id)
+                            if trend_up:
+                                send_telegram(f"🟢 BUY ALERT: {symbol} {price:.2f} dekat support {sup:.2f} (Tren naik)")
+                            else:
+                                send_telegram(f"⚪ SUPPORT TEST: {symbol} {price:.2f} dekat support {sup:.2f}")
+
+                # Cek resistance
+                for res in all_resists:
+                    if pct_diff(price, res) <= NEAR_TOL:
+                        alert_id = f"{symbol}-RES-{res:.2f}"
+                        if alert_id not in last_alerts:
+                            last_alerts.add(alert_id)
+                            if trend_down:
+                                send_telegram(f"🔴 SELL ALERT: {symbol} {price:.2f} dekat resistance {res:.2f} (Tren turun)")
+                            else:
+                                send_telegram(f"⚪ RESISTANCE TEST: {symbol} {price:.2f} dekat resistance {res:.2f}")
+
+            time.sleep(300)  # cek tiap 5 menit
+
+        except Exception as e:
+            send_telegram(f"⚠️ Error: {e}")
+            time.sleep(30)
