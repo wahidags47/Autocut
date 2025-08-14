@@ -2,3 +2,6 @@ flask
 pandas
 requests
 python-dateutil
+numpy
+mplfinance
+matplotlib
