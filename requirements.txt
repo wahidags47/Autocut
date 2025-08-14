@@ -1,0 +1,9 @@
+flask
+yt-dlp
+opencv-python-headless
+mediapipe
+scenedetect
+faster-whisper
+keybert
+scikit-learn
+ffmpeg-python
