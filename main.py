@@ -45,7 +45,7 @@ def swing_levels(h, l, window=5):
 
 # =============== MAIN LOOP ===============
 if __name__ == "__main__":
-    tv = TvDatafeed(username=TV_USERNAME, password=TV_PASSWORD)
+    tv = TvDatafeed(username=Enjoydrops, password=X1x2agus####)
     send_telegram("📢 Bot Multi-Coin Alert S/R aktif.")
 
     last_alerts = set()
