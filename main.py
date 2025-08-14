@@ -5,8 +5,8 @@ import pandas as pd
 import numpy as np
 
 # =============== KONFIG ENV ===============
-TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
-TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TELEGRAM_TOKEN = os.getenv("8400411121:AAEndGuw6PGtv6y0hGcxeR7O3G1-QWJqGtk")
+TELEGRAM_CHAT_ID = os.getenv("691664631")
 
 SYMBOLS = ["LTCUSDT", "BTCUSDT", "ETHUSDT"]  # Pair yang dimonitor
 INTERVAL = "15m"  # Timeframe Binance: 1m,3m,5m,15m,1h,4h,1d
