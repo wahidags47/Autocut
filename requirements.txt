@@ -1,6 +1,7 @@
-Flask
+flask
 requests
 python-binance
 pandas
 matplotlib
-mplfinance
+numpy
+ta
