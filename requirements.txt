@@ -1,7 +1,7 @@
 flask
+python-binance
 pandas
-requests
-python-dateutil
 numpy
-mplfinance
 matplotlib
+mplfinance
+requests
