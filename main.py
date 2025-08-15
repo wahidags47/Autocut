@@ -9,35 +9,33 @@ import pandas as pd
 import numpy as np
 import matplotlib
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 import mplfinance as mpf
+import matplotlib.pyplot as plt
 from flask import Flask, request
 
-# ---------- CONFIG ----------
+# ------------- CONFIG -------------
 TELEGRAM_TOKEN = os.getenv("TELEGRAM_TOKEN")
 RAILWAY_URL = os.getenv("RAILWAY_URL")  # e.g. https://autocut-production.up.railway.app
+PORT = int(os.environ.get("PORT", 5000))
 
 if not TELEGRAM_TOKEN or not RAILWAY_URL:
-    raise RuntimeError("Set TELEGRAM_TOKEN and RAILWAY_URL environment variables before running")
+    raise RuntimeError("Please set TELEGRAM_TOKEN and RAILWAY_URL environment variables")
 
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}"
-BINANCE_KLINES = "https://api.binance.com/api/v3/klines"
+BINANCE_KLINES_URL = "https://api.binance.com/api/v3/klines"
 
-# limits
-DEFAULT_LIMIT = 500
+# limits / defaults
 MAX_LIMIT = 1000
-
-# valid timeframe set for Binance
+DEFAULT_LIMIT = 500
 VALID_TFS = {"1m","3m","5m","15m","30m","1h","2h","4h","6h","8h","12h","1d","3d","1w","1M"}
 
 app = Flask(__name__)
 
-# ---------- UTIL ----------
-
+# ------------- UTIL TELEGRAM -------------
 def tg_send_text(chat_id, text):
     try:
-        resp = requests.post(f"{TELEGRAM_API}/sendMessage", json={"chat_id": chat_id, "text": text})
-        print("tg_send_text", resp.status_code, resp.text)
+        r = requests.post(f"{TELEGRAM_API}/sendMessage", json={"chat_id": chat_id, "text": text}, timeout=15)
+        print("tg_send_text:", r.status_code, r.text)
     except Exception as e:
         print("tg_send_text error:", e)
 
@@ -47,19 +45,20 @@ def tg_send_photo_bytes(chat_id, png_bytes, caption=None):
         data = {"chat_id": chat_id}
         if caption:
             data["caption"] = caption
-        resp = requests.post(f"{TELEGRAM_API}/sendPhoto", data=data, files=files, timeout=60)
-        print("tg_send_photo", resp.status_code, resp.text)
+        r = requests.post(f"{TELEGRAM_API}/sendPhoto", data=data, files=files, timeout=60)
+        print("tg_send_photo:", r.status_code, r.text)
     except Exception as e:
         print("tg_send_photo error:", e)
 
+# ------------- BINANCE DATA (REST) -------------
 def binance_get_klines(symbol="BTCUSDT", interval="4h", limit=500):
     symbol = symbol.upper()
     interval = interval.lower()
     if interval not in VALID_TFS:
-        raise ValueError("Invalid timeframe")
+        raise ValueError(f"Invalid timeframe: {interval}")
     limit = min(int(limit), MAX_LIMIT)
     params = {"symbol": symbol, "interval": interval, "limit": limit}
-    r = requests.get(BINANCE_KLINES, params=params, timeout=20)
+    r = requests.get(BINANCE_KLINES_URL, params=params, timeout=20)
     r.raise_for_status()
     data = r.json()
     df = pd.DataFrame(data, columns=[
@@ -72,7 +71,12 @@ def binance_get_klines(symbol="BTCUSDT", interval="4h", limit=500):
         df[c] = df[c].astype(float)
     return df[["open","high","low","close","volume"]]
 
-# ---------- S/R and Fibonacci ----------
+def get_price_simple(symbol="BTCUSDT"):
+    r = requests.get("https://api.binance.com/api/v3/ticker/price", params={"symbol": symbol}, timeout=10)
+    r.raise_for_status()
+    return float(r.json()["price"])
+
+# ------------- S/R and Fibonacci -------------
 def find_swings(highs, lows, window=5):
     highs_idx = []
     lows_idx = []
@@ -109,10 +113,9 @@ def fib_levels(support, resistance):
     }
     return retr, ext
 
-# ---------- Chart builder ----------
-def make_chart_bytes(df, title=None, sma_fast=50, sma_slow=200, swing_win=5):
+# ------------- Chart builder -------------
+def make_chart_png_bytes(df, title=None, sma_fast=50, sma_slow=200, swing_win=5):
     """
-    df: DataFrame with open, high, low, close, volume indexed by datetime
     returns: PNG bytes
     """
     try:
@@ -120,26 +123,34 @@ def make_chart_bytes(df, title=None, sma_fast=50, sma_slow=200, swing_win=5):
         close = plot_df["Close"]
         ma_fast = close.rolling(sma_fast).mean()
         ma_slow = close.rolling(sma_slow).mean()
-        rsi = (close.diff().apply(lambda x: x if x>0 else 0).ewm(alpha=1/14, adjust=False).mean() /
-               close.diff().abs().ewm(alpha=1/14, adjust=False).mean())  # simplified for plotting, not numeric RSI exact
+
+        # RSI (standard)
+        delta = close.diff()
+        up = delta.clip(lower=0)
+        down = -delta.clip(upper=0)
+        ma_up = up.ewm(alpha=1/14, adjust=False).mean()
+        ma_down = down.ewm(alpha=1/14, adjust=False).mean()
+        rs = ma_up / ma_down.replace(0, np.nan)
+        rsi_series = 100 - (100 / (1 + rs))
+
+        # MACD
         macd_line = close.ewm(span=12, adjust=False).mean() - close.ewm(span=26, adjust=False).mean()
         macd_sig = macd_line.ewm(span=9, adjust=False).mean()
         macd_hist = macd_line - macd_sig
 
         highs = plot_df["High"].to_numpy()
         lows = plot_df["Low"].to_numpy()
-        hs, ls = find_swings(highs, lows, window=swing_win)
-        support, resistance = pick_sr_from_swings(hs, ls)
+        highs_sw, lows_sw = find_swings(highs, lows, window=swing_win)
+        support, resistance = pick_sr_from_swings(highs_sw, lows_sw)
 
         retr, ext = {}, {}
         if support is not None and resistance is not None and support < resistance:
             retr, ext = fib_levels(support, resistance)
 
-        # prepare mpf addplots
         addplots = [
             mpf.make_addplot(ma_fast, color='tab:blue'),
             mpf.make_addplot(ma_slow, color='tab:red'),
-            mpf.make_addplot(rsi, panel=1, ylabel='RSI'),
+            mpf.make_addplot(rsi_series, panel=1, ylabel='RSI'),
             mpf.make_addplot(macd_line, panel=2, color='fuchsia'),
             mpf.make_addplot(macd_sig, panel=2, color='green'),
             mpf.make_addplot(macd_hist, type='bar', panel=2, color='dimgray', width=0.7)
@@ -151,25 +162,25 @@ def make_chart_bytes(df, title=None, sma_fast=50, sma_slow=200, swing_win=5):
 
         ax_main = axes[0]
 
-        # draw S/R
+        # draw S/R lines
         if support is not None:
-            ax_main.hlines(support, plot_df.index[0], plot_df.index[-1], colors='green', linestyles='--', linewidth=1.2)
-            ax_main.text(plot_df.index[-1], support, f"  S {support:.6f}", color='green', va='bottom', fontsize=8)
+            ax_main.hlines(support, plot_df.index[0], plot_df.index[-1], colors='green', linestyles='--', linewidth=1.2, alpha=0.9)
+            ax_main.text(plot_df.index[-1], support, f"  S {support:.6f}", color='green', fontsize=8, va='bottom')
         if resistance is not None:
-            ax_main.hlines(resistance, plot_df.index[0], plot_df.index[-1], colors='red', linestyles='--', linewidth=1.2)
-            ax_main.text(plot_df.index[-1], resistance, f"  R {resistance:.6f}", color='red', va='bottom', fontsize=8)
+            ax_main.hlines(resistance, plot_df.index[0], plot_df.index[-1], colors='red', linestyles='--', linewidth=1.2, alpha=0.9)
+            ax_main.text(plot_df.index[-1], resistance, f"  R {resistance:.6f}", color='red', fontsize=8, va='bottom')
 
         # draw fib retracement lines
         if retr:
             colors = {'0.236':'#cc9900','0.382':'#cc6600','0.5':'#888888','0.618':'#009900'}
             for k,v in retr.items():
                 ax_main.hlines(v, plot_df.index[0], plot_df.index[-1], colors=colors.get(k,'#999999'), linestyles=':', linewidth=1)
-                ax_main.text(plot_df.index[-1], v, f" {k} {v:.6f}", color=colors.get(k,'#999999'), va='bottom', fontsize=7)
+                ax_main.text(plot_df.index[-1], v, f" {k} {v:.6f}", color=colors.get(k,'#999999'), fontsize=7, va='bottom')
 
-        # fib extension
+        # fib extension (sell zone)
         if ext and "1.618" in ext:
             ax_main.hlines(ext["1.618"], plot_df.index[0], plot_df.index[-1], colors='purple', linestyles='-.', linewidth=1.2)
-            ax_main.text(plot_df.index[-1], ext["1.618"], f"  EXT 1.618 {ext['1.618']:.6f}", color='purple', va='bottom', fontsize=8)
+            ax_main.text(plot_df.index[-1], ext["1.618"], f"  EXT 1.618 {ext['1.618']:.6f}", color='purple', fontsize=8, va='bottom')
 
         if title:
             ax_main.set_title(title)
@@ -187,21 +198,16 @@ def make_chart_bytes(df, title=None, sma_fast=50, sma_slow=200, swing_win=5):
         traceback.print_exc()
         raise
 
-# ---------- Background processing ----------
+# ------------- Background worker (process heavy commands) -------------
 def process_update_async(update):
-    """
-    Heavy work goes here (chart generation / API calls).
-    This runs in a separate thread so webhook returns immediately.
-    """
     try:
-        # basic validation
         if not update or "message" not in update:
             return
         msg = update["message"]
         chat_id = msg["chat"]["id"]
         text = msg.get("text","").strip()
         if not text:
-            tg_send_text(chat_id, "No text command found.")
+            tg_send_text(chat_id, "No text command.")
             return
 
         parts = text.split()
@@ -217,23 +223,24 @@ def process_update_async(update):
                 except Exception as e:
                     tg_send_text(chat_id, f"❌ Failed to fetch price: {e}")
             else:
-                tg_send_text(chat_id, "Usage: /price BTC  (will query BTCUSDT)")
+                tg_send_text(chat_id, "Usage: /price BTC")
 
         elif cmd == "/chart":
             if len(parts) >= 3:
                 coin = parts[1].upper()
                 tf = parts[2].lower()
                 if tf not in VALID_TFS:
-                    tg_send_text(chat_id, "Timeframe invalid. Use examples: 15m, 1h, 4h, 1d")
+                    tg_send_text(chat_id, "Timeframe invalid. Examples: 15m, 1h, 4h, 1d")
                     return
                 symbol = coin if coin.endswith("USDT") else f"{coin}USDT"
                 try:
                     tg_send_text(chat_id, f"🔎 Generating {symbol} {tf} chart...")
                     df = binance_get_klines(symbol, tf, limit=300)
-                    png = make_chart_bytes(df.tail(300), title=f"{symbol} {tf.upper()}")
-                    tg_send_photo_bytes(chat_id, png, caption=f"📈 {symbol} {tf.upper()} (S/R + Fib + MA50/200 + RSI + MACD)")
+                    png = make_chart_png_bytes(df.tail(300), title=f"{symbol} {tf.upper()}")
+                    tg_send_photo_bytes(chat_id, png, caption=f"📈 {symbol} {tf.upper()} (MA50/200 + RSI + MACD + S/R + Fib)")
                 except Exception as e:
                     tg_send_text(chat_id, f"❌ Chart error: {e}")
+                    traceback.print_exc()
             else:
                 tg_send_text(chat_id, "Usage: /chart BTC 4h")
 
@@ -242,46 +249,41 @@ def process_update_async(update):
     except Exception:
         traceback.print_exc()
 
-def get_price_simple(symbol="BTCUSDT"):
-    r = requests.get("https://api.binance.com/api/v3/ticker/price", params={"symbol": symbol}, timeout=10)
-    r.raise_for_status()
-    return float(r.json()["price"])
-
-# ---------- Webhook route (respond fast) ----------
+# ------------- Webhook route (fast response) -------------
 @app.route(f"/{TELEGRAM_TOKEN}", methods=["POST"])
 def webhook():
     try:
         update = request.get_json(force=True)
-        # log raw update for debugging
         print("Received update:", update)
-        # spawn background thread to process heavy work
+        # spawn background worker
         t = threading.Thread(target=process_update_async, args=(update,), daemon=True)
         t.start()
     except Exception as e:
         print("Webhook handler exception:", e)
         traceback.print_exc()
-    # Always return OK quickly so Telegram won't mark webhook as failed
+    # return OK immediately so Telegram won't mark webhook failed
     return "ok", 200
 
 @app.route("/", methods=["GET"])
 def home():
-    return "Bot (SR+Fib) running", 200
+    return "Bot (SR + Fib) running", 200
 
-# ---------- Ensure webhook is set (delete old and set to current) ----------
+# ------------- Ensure webhook is set -------------
 def ensure_set_webhook():
     try:
-        # delete old webhook first (safe)
         requests.get(f"{TELEGRAM_API}/deleteWebhook", timeout=10)
-        expected = f"{RAILWAY_URL.rstrip('/')}/{TELEGRAM_TOKEN}"
+    except Exception:
+        pass
+    expected = f"{RAILWAY_URL.rstrip('/')}/{TELEGRAM_TOKEN}"
+    try:
         r = requests.post(f"{TELEGRAM_API}/setWebhook", data={"url": expected}, timeout=20)
         print("setWebhook resp:", r.status_code, r.text)
     except Exception as e:
         print("ensure_set_webhook error:", e)
         traceback.print_exc()
 
-# ---------- Start ----------
+# ------------- Start -------------
 if __name__ == "__main__":
     print("Starting app, ensuring webhook...")
     ensure_set_webhook()
-    port = int(os.environ.get("PORT", 5000))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=PORT)
