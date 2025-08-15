@@ -287,3 +287,7 @@ if __name__ == "__main__":
     print("Starting app, ensuring webhook...")
     ensure_set_webhook()
     app.run(host="0.0.0.0", port=PORT)
+if __name__ == '__main__':
+    import os
+    port = int(os.environ.get("PORT", 8080))  # Default ke 8080 kalau variabel PORT tidak ada
+    app.run(host='0.0.0.0', port=port)
