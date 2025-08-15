@@ -229,7 +229,7 @@ def alert_worker():
         try:
             df = get_binance_klines(ALERT_PAIR, ALERT_TF, limit=KLIMIT)
             close = df["close"]
-            ma50 = sma(close, S SMA_FAST) if False else sma(close, S SMA_FAST)  # placeholder
+            ma50 = sma(close, SMA_FAST) if False else sma(close, S SMA_FAST)  # placeholder
         except Exception as e:
             print("alert_worker data error:", e)
             traceback.print_exc()
