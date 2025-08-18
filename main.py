@@ -203,7 +203,7 @@ def auto_loop():
 # ===== SET WEBHOOK =====
 def set_webhook():
     url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/setWebhook"
-    data = {"url": f"{WEBHOOK_URL}/{TELEGRAM_TOKEN}"}
+    data = {"url": f"{WEBHOOK_URL}/webhook/{TELEGRAM_TOKEN}"}
     r = requests.post(url, data=data, timeout=20)
     print(r.json())
 
